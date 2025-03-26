@@ -1,30 +1,183 @@
-<html>
+<!DOCTYPE html>
+<style>
+	.container {
+		display: flex;
+		height: 100vh;
+	}
+
+	.left {
+		width: 30%;
+		height: 100%;
+		overflow: auto;
+		padding: 16px;
+		border: 1px solid #999;
+	}
+
+	.right {
+		width: 70%;
+		height: 100%;
+		overflow: auto;
+		padding: 16px;
+		border: 1px solid #999;
+		border-left: 0;
+	}
+
+
+	.tree-node {
+		cursor: pointer;
+		/* 为伪元素设置定位上下文 */
+		position: relative;
+	}
+
+	.tree-node::before {
+		/* 使用Unicode字符表示箭头  向下箭头*/
+		content: '▾';
+		/* content: '▶'; */
+		display: inline-block;
+		/* 为箭头和文字之间添加间距 */
+		margin-right: 5px;
+		/* 平滑变换箭头方向 */
+		transition: transform 0.2s ease-in-out;
+	}
+
+	.tree-node.expanded::before {
+		/* 旋转箭头以表示展开状态 */
+		transform: rotate(-90deg);
+	}
+
+	.ml-20 {
+		margin-left: 20px;
+	}
+
+	.content {
+		height: 200px;
+	}
+</style>
+
 <body>
-    <script src="https://js.puter.com/v2/"></script>
+	<div class="container">
+		<div class="left">
+			<button>打开文件夹</button>
+			<div id="folder"></div>
+		</div>
+		<div class="right">
+			<pre>
+				<code id="content">
+						
+				</code>
+			</pre>
+		</div>
+	</div>
 
-    <button id="open-directory">Open directory</button>
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/default.min.css">
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 
-    <h1 id="directory-name"></h1>
-    <pre><code id="directory-content"></code></pre>
+	<!-- and it's easy to individually load additional languages -->
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
 
-    <script>
-        document.getElementById('open-directory').addEventListener('click', ()=>{
-            puter.ui.showDirectoryPicker().then(async (directory)=>{
-                // print directory name
-                document.getElementById('directory-name').innerHTML = directory.name;
-                // print directory content
-                const children = await directory.readdir();
-                if(children.length){
-                    let content = '';
-                    for(let child of children){
-                        content += child.name + '\n';
-                    }
-                    document.getElementById('directory-content').innerText = content;
-                }else{
-                    document.getElementById('directory-content').innerText = 'Empty directory';
-                }
-            });
-        });
-    </script>
+	<script>
+
+
+		const folderNode = document.getElementById('folder')
+		const contentNode = document.getElementById('content')
+		const btnNode = document.querySelector('button')
+
+
+		btnNode.onclick = async () => {
+			//使用showDirectoryPicker()方法打开文件夹选择器，并获取文件夹句柄（handle）
+			const handle = await showDirectoryPicker()
+			await processHandle(handle)
+			// 将文件夹内容添加到页面中
+			let container = processHtml(handle)
+			folderNode.appendChild(container)
+		}
+		/**
+		 * 读取文件内容
+		 * @param {*} handle 
+		 * @returns 
+		 */
+		async function readFile(handle) {
+			return new Promise(async (resolve, reject) => {
+				const file = await handle.getFile()
+				const fileReader = new FileReader()
+				fileReader.readAsText(file)
+				fileReader.onload = e => {
+					resolve(e.target.result)
+				}
+			})
+		}
+
+
+		/**
+		 * 递归处理句柄
+		 * @param {*} handle 
+		 * @returns 
+		 */
+		function processHtml(handle) {
+			const isFolder = handle.kind === 'directory'
+			const div = document.createElement('div')
+			div.textContent = handle.name
+			div.classList.add('ml-20')
+			if (isFolder) {
+				div.classList.add('tree-node')
+				div.dataset.isFolder = true
+				// 添加折叠效果
+				div.addEventListener('click', function (e) {
+					// 如果点击的是文件夹，则进行展开或折叠  
+					e.stopPropagation(); // 阻止事件冒泡，防止父级文件夹也被点击  
+					// 切换展开/折叠状态  
+					div.classList.toggle('expanded');
+					// 将子元素隐藏
+					// 获取所有的直接子元素  
+					const childElements = div.children;
+					// 遍历所有的直接子元素并将它们隐藏  
+					for (let i = 0; i < childElements.length; i++) {
+						let isHidden = childElements[i].style.display === 'none';
+						childElements[i].style.display = isHidden ? 'block' : 'none';
+					}
+				});
+				// 递归处理文件夹目录
+				if (handle.children.length) {
+					for (let i = 0; i < handle.children.length; i++) {
+						const element = handle.children[i];
+						const eleHtml = processHtml(element)
+						div.appendChild(eleHtml)
+					}
+				}
+			} else {
+
+				div.dataset.isFolder = false
+				// 添加背景色
+				div.style.backgroundColor = '#f0f0f0'
+				div.addEventListener('click', async function (e) {
+					e.stopImmediatePropagation(); // 阻止事件冒泡，防止父级文件夹也被点击  
+				const	content = await readFile(handle)
+					contentNode.innerText = content
+					hljs.highlightAll();
+				})
+			}
+			return div
+		}
+
+		/** 
+		 * 递归处理文件夹目录
+		 * @param {*} handle 
+		 * @returns 
+		 */
+		async function processHandle(handle) {
+			if (handle.kind === 'file') {
+				return;
+			}
+			handle.children = []
+			// 获取文件夹中的所有内容
+			const iter = await handle.entries()
+			// 返回异步迭代器
+			for await (const entry of iter) {
+				await processHandle(entry[1])
+				handle.children.push(entry[1])
+			}
+		}
+	</script>
 </body>
+
 </html>
